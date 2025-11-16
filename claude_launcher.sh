@@ -1672,6 +1672,20 @@ main() {
     local choice
     local -a claude_args
 
+    # Handle help and version flags immediately (before any initialization)
+    for arg in "$@"; do
+        case "${arg}" in
+            -h|--help)
+                show_help
+                exit "${E_SUCCESS}"
+                ;;
+            -v|--version)
+                echo "Claude Launcher v${SCRIPT_VERSION}"
+                exit "${E_SUCCESS}"
+                ;;
+        esac
+    done
+
     # Parse command line arguments
     mapfile -t claude_args < <(parse_arguments "$@")
 
