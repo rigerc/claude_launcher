@@ -933,7 +933,26 @@ get_openai_compatible_providers() {
 
 # Get provider list for selection
 get_provider_list() {
-    get_openai_compatible_providers | jq -r '"\(.name) (\(.api))"'
+    # Process each provider and check if API key is set
+    while IFS= read -r line; do
+        local provider_name api_url env_var
+
+        # Parse JSON line (compact format)
+        provider_name=$(echo "${line}" | jq -r '.name')
+        api_url=$(echo "${line}" | jq -r '.api')
+        env_var=$(echo "${line}" | jq -r '.env[0] // empty')
+
+        # Build display string
+        local display="${provider_name} (${api_url})"
+
+        # Check if API key environment variable is set and not empty
+        # Note: gum choose strips ANSI codes, so we use plain text indicator
+        if [[ -n "${env_var}" ]] && [[ -n "${!env_var:-}" ]]; then
+            display="${display}  [✓ API KEY FOUND]"
+        fi
+
+        echo "${display}"
+    done < <(get_openai_compatible_providers | jq -c '.')
 }
 
 # Get models for a selected provider
