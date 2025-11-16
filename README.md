@@ -1,43 +1,18 @@
-# Claude Launcher
+# Claude Launcher 🚀
 
-A comprehensive bash script for launching Claude CLI with multiple provider configurations, including via proxy powered by Claude-Connect for OpenAI-compatible providers.
+A simple bash script that lets you use Claude CLI with different providers like OpenAI, Z.ai, and others. Powered by [Claude-Connect](https://github.com/drbarq/Claude-Connect) for proxy functionality and [models.dev](https://models.dev) for provider data, it handles all the complicated setup stuff so you can just pick your provider and start chatting.
 
-## Features
+## What it does
 
-- **Multi-Provider Support**: Launch Claude with various providers (Standard Claude, Z.ai, OpenAI-compatible providers)
-- **Interactive Provider Selection**: User-friendly interface powered by `gum`
-- **Automatic Proxy Management**: Built-in proxy server for OpenAI-compatible providers
-- **API Data Caching**: Efficient caching of provider and model data with configurable TTL
-- **Comprehensive Logging**: Structured logging with multiple levels (DEBUG, INFO, WARN, ERROR)
-- **Security Hardened**: Input sanitization, validation, and secure process management
-- **Configuration Management**: Flexible configuration system with multiple locations
-- **Dry Run Mode**: Test provider selection without launching Claude
-- **Process Cleanup**: Robust cleanup of background processes and temporary files
+- **Multiple providers**: Use standard Claude, Z.ai, or any OpenAI-compatible provider
+- **Easy selection**: Pick your provider and model from a nice menu
+- **Auto setup**: Handles proxy servers and API connections for you
+- **Smart caching**: Remembers available models so it starts faster
+- **No hassle**: Takes care of all the boring configuration details
 
-## Requirements
+## Quick Start
 
-- [gum](https://github.com/charmbracelet/gum) - Interactive terminal UI
-- [jq](https://stedolan.github.io/jq/) - JSON processor
-- [curl](https://curl.se/) - HTTP client
-- [claude](https://github.com/anthropics/claude-cli) - Official Claude CLI
-- [python](https://python.org) or [python3](https://python.org) - For Claude-Connect proxy
-- Optional: [Claude-Connect](https://github.com/drbarq/Claude-Connect) - For OpenAI-compatible providers
-
-## Installation
-
-### 1. Download the Script
-
-```bash
-# Clone the repository
-git clone https://github.com/your-username/claude-launcher.git
-cd claude-launcher
-
-# Or download the script directly
-curl -O https://raw.githubusercontent.com/your-username/claude-launcher/main/claude_launcher.sh
-chmod +x claude_launcher.sh
-```
-
-### 2. Install Dependencies
+### 1. Install the basics
 
 **macOS:**
 ```bash
@@ -46,364 +21,131 @@ brew install gum jq curl
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt-get update
-sudo apt-get install gum jq curl
+echo "deb [trusted=yes] https://repo.charm.sh/apt/ /" | sudo tee /etc/apt/sources.list.d/charm.list
+sudo apt update && sudo apt install gum jq curl
 ```
 
-**Fedora/CentOS:**
+**Other Linux:**
 ```bash
-sudo dnf install gum jq curl
+# Download gum
+sudo wget -qO /usr/local/bin/gum https://github.com/charmbracelet/gum/releases/latest/download/gum_Linux_x86_64.tar.gz
+sudo tar -xzf /usr/local/bin/gum gum_Linux_x86_64.tar.gz -C /usr/local/bin/ gum
+sudo rm gum_Linux_x86_64.tar.gz
+sudo chmod +x /usr/local/bin/gum
+
+# Install jq and curl
+sudo apt-get install jq curl  # or yum install jq curl
 ```
 
-### 3. Install Claude CLI
+### 2. Get the script
 
 ```bash
-# Using npm
-npm install -g @anthropic-ai/claude-cli
-
-# Or following the official installation guide
-# https://github.com/anthropics/claude-cli?tab=readme-ov-file#installation
+curl -O https://raw.githubusercontent.com/your-repo/claude_launcher.sh
+chmod +x claude_launcher.sh
 ```
 
-### 4. Install Claude-Connect (Optional)
-
-For OpenAI-compatible provider support:
+### 3. (Optional) Get Claude-Connect for OpenAI providers
 
 ```bash
-# Clone Claude-Connect
-git clone https://github.com/drbarq/Claude-Connect.git
-cd Claude-Connect
-
-# Or download claude_connect.py directly
 curl -O https://raw.githubusercontent.com/drbarq/Claude-Connect/main/claude_connect.py
+chmod +x claude_connect.py
 ```
 
-## Quick Start
+## Using it
 
-### Interactive Mode
-
+### Basic usage
 ```bash
+# Interactive mode - just pick what you want
 ./claude_launcher.sh
+
+# Or jump straight to a provider
+./claude_launcher.sh -p claude      # Standard Claude
+./claude_launcher.sh -p zai         # Z.ai
+./claude_launcher.sh -p openai      # OpenAI-compatible provider
 ```
 
-This will present an interactive menu to select your provider and configuration.
-
-### Direct Provider Selection
-
+### Test it first
 ```bash
-# Launch standard Claude
-./claude_launcher.sh -p claude
-
-# Launch with Z.ai (requires ZAI_API_KEY)
-./claude_launcher.sh -p zai
-
-# Launch with OpenAI-compatible provider
-./claude_launcher.sh -p openai
-
-# Dry run to test selection without launching
-./claude_launcher.sh -p openai --dry-run
+# Try without actually launching Claude
+./claude_launcher.sh --dry-run
 ```
 
-### Passing Arguments to Claude
-
+### Command line arguments
 ```bash
-# Pass Claude CLI arguments after --
-./claude_launcher.sh -p claude -- --model opus --stream
+./claude_launcher.sh [OPTIONS] [-- CLAUDE_ARGS]
 
-# With file arguments
-./claude_launcher.sh -p zai -- my_prompt.txt
+Options:
+  -p, --provider PROVIDER    Skip menu and go straight to a provider
+  -c, --config FILE          Use a specific config file
+  -q, --quiet                Less output (just the essentials)
+      --dry-run              Test provider selection without actually launching Claude
+      --log-level LEVEL      How much info to show (DEBUG, INFO, WARN, ERROR)
+  -h, --help                 Show help
+  -v, --version              Show version
+
+Examples:
+  ./claude_launcher.sh -p claude              # Use standard Claude directly
+  ./claude_launcher.sh -p openai --dry-run    # Test OpenAI setup
+  ./claude_launcher.sh --quiet                # Minimal output
+  ./claude_launcher.sh --log-level DEBUG      # Lots of debugging info
 ```
 
-## Configuration
+### Environment variables
+```bash
+# Set your API keys
+export ZAI_API_KEY="your_zai_key"
+export OPENAI_API_KEY="your_openai_key"
 
-### Configuration File Locations
+# Tell it where to find claude_connect.py
+export CLAUDE_CONNECT_SCRIPT="/path/to/claude_connect.py"
+```
 
-The script searches for configuration in the following order:
+## Providers
 
-1. `$CLAUDE_LAUNCHER_CONFIG` (environment variable)
-2. `~/.claude_launcher.conf`
-3. `$XDG_CONFIG_HOME/claude_launcher/config`
-4. `~/.config/claude_launcher/config`
-5. `/etc/claude_launcher.conf`
+### Standard Claude
+Just need the regular Claude CLI installed and configured.
 
-### Sample Configuration
+### Z.ai
+Set `ZAI_API_KEY` and you're good to go.
+
+### OpenAI-compatible providers
+The script uses [Claude-Connect](https://github.com/drbarq/Claude-Connect) as a proxy and gets provider info from [models.dev](https://models.dev/api.json). It'll prompt for API keys as needed. The launcher will use env variables from Models.dev for each provider for the API key.
+
+## Configuration (optional)
 
 Create `~/.claude_launcher.conf`:
 
 ```bash
 # Claude Connect script path
-CLAUDE_CONNECT_SCRIPT="/opt/claude-connect/claude_connect.py"
+CLAUDE_CONNECT_SCRIPT="/path/to/claude_connect.py"
 
-# API settings
-MODELS_DEV_API_URL="https://models.dev/api.json"
-CACHE_TTL=3600  # 1 hour
+# Show only free models
+PROVIDER_MODELS_ONLY_FREE="true"
 
-# Proxy settings
-PROXY_PORT=8080
-PROXY_STARTUP_TIMEOUT=30
+# Your favorite models (comma-separated)
+PREFERRED_MODELS="GPT-4,Claude-3-Sonnet"
 
-# Provider filter settings
-PROVIDER_MODELS_ONLY_FREE=true
-PROVIDER_MODELS_ONLY_REASONING=false
-PREFERRED_MODELS="gpt-4,claude-3-opus"
-
-# Z.ai configuration
-ZAI_BASE_URL="https://api.z.ai/api/anthropic"
-ZAI_HAIKU_MODEL="glm-4.5-air"
-ZAI_OPUS_MODEL="glm-4.6"
-ZAI_SONNET_MODEL="glm-4.6"
-
-# UI preferences
-AUTO_SELECT_PROVIDER=""
-QUIET_MODE=false
-LOG_LEVEL="INFO"
+# Z.ai settings
+ZAI_API_KEY="your_key_here"
 ```
 
-### Environment Variables
+## Troubleshooting
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CLAUDE_LAUNCHER_CONFIG` | Path to configuration file | `~/.claude_launcher.conf` |
-| `AUTO_SELECT_PROVIDER` | Auto-select provider without menu | `""` |
-| `QUIET_MODE` | Reduce output verbosity | `false` |
-| `LOG_LEVEL` | Logging level (DEBUG, INFO, WARN, ERROR) | `INFO` |
-| `ZAI_API_KEY` | Z.ai API key | Required for Z.ai |
-| `OPENAI_API_KEY` | OpenAI API key | Required for OpenAI providers |
-| `ANTHROPIC_API_KEY` | Anthropic API key | Required for Anthropic providers |
-| `PREFERRED_MODELS` | Comma-separated list of preferred models | `""` |
-| `PROVIDER_MODELS_ONLY_FREE` | Show only free models | `true` |
-| `PROVIDER_MODELS_ONLY_REASONING` | Show only reasoning models | `true` |
-| `CHECK_CLAUDE_CONNECT_UPDATES` | Check for Claude Connect updates | `true` |
-| `CACHE_TTL` | API cache TTL in seconds | `3600` |
+**Missing dependencies?** Install gum, jq, and curl (see above).
 
-## Usage
+**Claude-Connect not found?** Set `CLAUDE_CONNECT_SCRIPT` or let the script prompt you.
 
-### Command Line Options
+**API key issues?** Set environment variables or let the script ask for them.
 
+**Weird errors?** Run with debug logging:
 ```bash
-Usage: claude_launcher.sh [OPTIONS] [-- CLAUDE_ARGS]
-
-Options:
-  -p, --provider PROVIDER    Select provider (claude, zai, openai)
-  -c, --config FILE          Use specific configuration file
-  -q, --quiet                Quiet mode (minimal output)
-      --dry-run              Test provider selection without launching Claude
-      --log-level LEVEL      Set log level (DEBUG, INFO, WARN, ERROR)
-  -h, --help                 Show this help message
-  -v, --version              Show version information
-```
-
-### Provider Types
-
-#### 1. Standard Claude (`claude`)
-Launches the official Claude CLI directly.
-
-```bash
-./claude_launcher.sh -p claude -- --model opus
-```
-
-#### 2. Z.ai (`zai`)
-Uses the Z.ai API as a proxy to Claude models.
-
-```bash
-export ZAI_API_KEY="your-zai-api-key"
-./claude_launcher.sh -p zai
-```
-
-#### 3. OpenAI-Compatible Providers (`openai`)
-Routes requests through OpenAI-compatible providers via Claude-Connect proxy.
-
-Supports providers like:
-- OpenAI
-- Together AI
-- Groq
-- Anthropic (via OpenAI compatibility)
-- And many others from [models.dev](https://models.dev)
-
-```bash
-# Interactive selection
-./claude_launcher.sh -p openai
-
-# With preferred models
-export PREFERRED_MODELS="gpt-4-turbo,claude-3-opus"
-./claude_launcher.sh -p openai
-```
-
-## API Key Management
-
-### Provider API Keys
-
-Each OpenAI-compatible provider requires its own API key:
-
-- **OpenAI**: `OPENAI_API_KEY`
-- **Together AI**: `TOGETHER_API_KEY`
-- **Groq**: `GROQ_API_KEY`
-- **Anthropic**: `ANTHROPIC_API_KEY`
-
-The script will prompt for API keys if they're not set in the environment.
-
-### Z.ai API Key
-
-```bash
-export ZAI_API_KEY="your-zai-api-key"
-
-# Or set in your shell profile (~/.bashrc, ~/.zshrc)
-echo 'export ZAI_API_KEY="your-zai-api-key"' >> ~/.bashrc
-```
-
-## Advanced Usage
-
-### Proxy Management
-
-The script automatically manages the Claude-Connect proxy for OpenAI-compatible providers:
-
-- **Port Detection**: Automatically finds available ports
-- **Process Cleanup**: Ensures proper shutdown
-- **Health Checks**: Waits for proxy to be ready
-- **Log Management**: Captures proxy output to log files
-
-### Caching
-
-API responses from `models.dev` are cached locally for performance:
-
-- **Location**: `$XDG_CACHE_HOME/claude_launcher/models_dev_api.json`
-- **TTL**: Configurable via `CACHE_TTL` (default: 1 hour)
-- **Stale Fallback**: Uses stale cache if network is unavailable
-
-### Logging
-
-Structured logging with multiple levels:
-
-```bash
-# Enable debug logging
 ./claude_launcher.sh --log-level DEBUG
-
-# View logs
-tail -f ~/.local/share/claude_launcher/logs/claude_launcher.log
-
-# Proxy logs
-tail -f ~/.local/share/claude_launcher/logs/proxy.log
 ```
 
-### Automatic Updates
+## That's it!
 
-#### Claude Connect Update Checking
-The script automatically checks for updates to `claude_connect.py` before launching:
-
-- **Frequency**: Checks once every 24 hours
-- **Method**: Compares content hashes of first 1KB of the script
-- **Notification**: Shows warning if your version differs from the latest
-- **Caching**: Results are cached to avoid repeated network requests
-
-**Disable update checking**:
-```bash
-export CHECK_CLAUDE_CONNECT_UPDATES=false
-# Or add to config file:
-echo 'CHECK_CLAUDE_CONNECT_UPDATES=false' >> ~/.claude_launcher.conf
-```
-
-### Troubleshooting
-
-#### Common Issues
-
-**1. "Missing required dependencies"**
-```bash
-# Install missing tools
-brew install gum jq curl  # macOS
-sudo apt-get install gum jq curl  # Ubuntu
-```
-
-**2. "Claude Connect script not found"**
-- Set `CLAUDE_CONNECT_SCRIPT` in configuration
-- Or the script will prompt you when selecting OpenAI-compatible providers
-
-**3. "Port already in use"**
-- The script automatically finds alternative ports
-- Check for running processes: `ps aux | grep claude_connect`
-
-**4. "Invalid API key"**
-- Verify environment variables are set
-- Check API key validity and permissions
-
-**5. "Cache issues"**
-```bash
-# Clear cache
-rm -rf ~/.cache/claude_launcher/
-```
-
-#### Debug Mode
-
-```bash
-# Enable detailed logging
-export LOG_LEVEL=DEBUG
-./claude_launcher.sh -p openai --dry-run
-```
-
-#### Log Analysis
-
-```bash
-# View recent logs
-tail -n 50 ~/.local/share/claude_launcher/logs/claude_launcher.log
-
-# Follow logs in real-time
-tail -f ~/.local/share/claude_launcher/logs/claude_launcher.log
-
-# Filter errors
-grep ERROR ~/.local/share/claude_launcher/logs/claude_launcher.log
-```
-
-## Development
-
-### Testing
-
-Run the test suite:
-
-```bash
-# Install BATS (if not already installed)
-brew install bats-core  # macOS
-
-# Run all tests
-bats tests/
-
-# Run specific test types
-bats tests/unit/
-bats tests/integration/
-
-# Verbose output
-bats -t tests/
-```
-
-### Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
-
-## Security Considerations
-
-- **Input Validation**: All user input is sanitized and validated
-- **API Key Protection**: Keys are not logged or exposed in process lists
-- **File Permissions**: Config files should have restrictive permissions (600)
-- **Process Isolation**: Proxy processes run in separate sessions
-- **Cleanup**: Robust cleanup prevents resource leaks
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/your-username/claude-launcher/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-username/claude-launcher/discussions)
-- **Claude-Connect**: [drbarq/Claude-Connect](https://github.com/drbarq/Claude-Connect)
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for version history and changes.
+No complicated setup, no reading through pages of documentation. Just run the script and pick your provider. It handles the rest.
 
 ---
 
-**Note**: This script is not affiliated with Anthropic or the official Claude CLI. It's a community tool for enhancing Claude usage across multiple providers.
+*Powered by [Claude-Connect](https://github.com/drbarq/Claude-Connect) and [models.dev](https://models.dev)*

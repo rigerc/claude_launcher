@@ -810,7 +810,7 @@ get_openai_compatible_providers() {
             doc: .value.doc,
             models: [
                 .value.models | to_entries[] |
-                '"${jq_filter}"' |
+                select($jq_filter) |
                 {
                     id: .key,
                     name: .value.name,
