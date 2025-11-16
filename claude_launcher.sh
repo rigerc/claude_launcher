@@ -74,9 +74,9 @@ PROXY_PORT="${PROXY_PORT:-8080}"
 PROXY_STARTUP_TIMEOUT="${PROXY_STARTUP_TIMEOUT:-30}"
 PROXY_HEALTH_CHECK_INTERVAL="${PROXY_HEALTH_CHECK_INTERVAL:-1}"
 
-# Provider filter settings
-PROVIDER_MODELS_ONLY_FREE="${PROVIDER_MODELS_ONLY_FREE:-true}"
-PROVIDER_MODELS_ONLY_REASONING="${PROVIDER_MODELS_ONLY_REASONING:-true}"
+# Provider filter settings (disabled)
+# PROVIDER_MODELS_ONLY_FREE="${PROVIDER_MODELS_ONLY_FREE:-true}"
+# PROVIDER_MODELS_ONLY_REASONING="${PROVIDER_MODELS_ONLY_REASONING:-true}"
 PREFERRED_MODELS="${PREFERRED_MODELS:-}"
 
 # Z.ai configuration
@@ -778,48 +778,24 @@ load_api_data() {
 
 # Get OpenAI-compatible providers with tool_call capable models
 get_openai_compatible_providers() {
-    local filter="$1"
-
     if [[ ! -f "${API_CACHE}" ]]; then
         die "${E_API}" "API cache not loaded. Call load_api_data first."
     fi
 
-    local jq_filter
-    case "${filter}" in
-        "free_reasoning")
-            jq_filter='select(has("cost") and .value.cost != null and (.value.cost.input // 1) == 0 and (.value.cost.output // 1) == 0 and .value.reasoning == true)'
-            ;;
-        "free")
-            jq_filter='select(has("cost") and .value.cost != null and (.value.cost.input // 1) == 0 and (.value.cost.output // 1) == 0)'
-            ;;
-        "reasoning")
-            jq_filter='select(.value.reasoning == true)'
-            ;;
-        "")
-            jq_filter='select(true)'
-            ;;
-        *)
-            log_warn "Invalid filter: ${filter}. Using no filter."
-            jq_filter='select(true)'
-            filter=""
-            ;;
-    esac
-
-    jq "to_entries | map(
-        select(.value.npm != null and (.value.npm | type) == \"string\" and (.value.npm == \"@ai-sdk/openai-compatible\" or .value.npm == \"@ai-sdk/openai\")) |
+    jq 'to_entries | map(
+        select(.value.npm != null and (.value.npm | type) == "string" and (.value.npm == "@ai-sdk/openai-compatible" or .value.npm == "@ai-sdk/openai")) |
         {
             provider_key: .key,
             id: .value.id,
             name: .value.name,
-            api: (.value.api | if (type == \"string\" and (endswith(\"/v1\") or endswith(\"/v1/\"))) then
-                        if endswith(\"/v1/\") then .[:-4] elif endswith(\"/v1\") then .[:-3] else . end
+            api: (.value.api | if (type == "string" and (endswith("/v1") or endswith("/v1/"))) then
+                        if endswith("/v1/") then .[:-4] elif endswith("/v1") then .[:-3] else . end
                     else . end),
             env: .value.env,
             doc: .value.doc,
             models: [
                 .value.models | to_entries[] |
                 select(.value.tool_call == true) |
-                ${jq_filter} |
                 {
                     id: .key,
                     name: .value.name,
@@ -828,21 +804,19 @@ get_openai_compatible_providers() {
                 }
             ]
         }
-    ) | map(select(.models | length > 0)) | .[]" "${API_CACHE}"
+    ) | map(select(.models | length > 0)) | .[]' "${API_CACHE}"
 }
 
 # Get provider list for selection
 get_provider_list() {
-    local filter="$1"
-    get_openai_compatible_providers "${filter}" | jq -r '"\(.name) (\(.api))"'
+    get_openai_compatible_providers | jq -r '"\(.name) (\(.api))"'
 }
 
 # Get models for a selected provider
 get_provider_models() {
     local provider_name="$1"
-    local filter="$2"
 
-    get_openai_compatible_providers "${filter}" | \
+    get_openai_compatible_providers | \
         jq --arg provider_name "${provider_name}" \
            'select(.name == $provider_name) | .models[] | "\(.name) (\(.id))"'
 }
@@ -850,9 +824,8 @@ get_provider_models() {
 # Get provider details by name
 get_provider_details() {
     local provider_name="$1"
-    local filter="$2"
 
-    get_openai_compatible_providers "${filter}" | \
+    get_openai_compatible_providers | \
         jq --arg provider_name "${provider_name}" 'select(.name == $provider_name)'
 }
 
@@ -1291,19 +1264,9 @@ launch_claude_openai_provider() {
         fi
     fi
 
-    # Determine filter based on settings
-    filter=""
-    if [[ "${PROVIDER_MODELS_ONLY_REASONING}" == "true" ]] && [[ "${PROVIDER_MODELS_ONLY_FREE}" == "true" ]]; then
-        filter="free_reasoning"
-    elif [[ "${PROVIDER_MODELS_ONLY_REASONING}" == "true" ]]; then
-        filter="reasoning"
-    elif [[ "${PROVIDER_MODELS_ONLY_FREE}" == "true" ]]; then
-        filter="free"
-    fi
-
     # Get available providers
     local provider_list
-    provider_list=$(get_provider_list "${filter}")
+    provider_list=$(get_provider_list)
 
     if [[ -z "${provider_list}" ]]; then
         die "${E_API}" "No providers found matching the specified filters"
@@ -1323,7 +1286,7 @@ launch_claude_openai_provider() {
     log_info "Selected provider: ${provider_name}"
 
     # Get provider details
-    provider_details=$(get_provider_details "${provider_name}" "${filter}")
+    provider_details=$(get_provider_details "${provider_name}")
 
     if [[ -z "${provider_details}" ]]; then
         die "${E_API}" "Failed to get provider details"
@@ -1366,7 +1329,7 @@ launch_claude_openai_provider() {
     fi
 
     # Get available models for the provider
-    models=$(get_provider_models "${provider_name}" "${filter}")
+    models=$(get_provider_models "${provider_name}")
 
     if [[ -z "${models}" ]]; then
         die "${E_API}" "No models found for ${provider_name}"
@@ -1455,8 +1418,6 @@ Environment Variables:
   LOG_LEVEL                         Logging level (DEBUG, INFO, WARN, ERROR)
   ZAI_API_KEY                      Z.ai API key
   PREFERRED_MODELS                  Comma-separated list of preferred model names
-  PROVIDER_MODELS_ONLY_FREE         Show only free models (true/false)
-  PROVIDER_MODELS_ONLY_REASONING    Show only reasoning models (true/false)
   CACHE_TTL                         API cache TTL in seconds (default: 3600)
 
 Provider API Keys:
