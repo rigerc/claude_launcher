@@ -960,7 +960,7 @@ get_provider_models() {
     local provider_name="$1"
 
     get_openai_compatible_providers | \
-        jq --arg provider_name "${provider_name}" \
+        jq -r --arg provider_name "${provider_name}" \
            'select(.name == $provider_name) | .models[] | "\(.name) (\(.id))"'
 }
 
@@ -1527,7 +1527,7 @@ launch_claude_openai_provider() {
         echo "  Proxy Port: ${proxy_port}"
         echo
         echo "Command that would be executed:"
-        echo "  ANTHROPIC_BASE_URL=\"http://localhost:${proxy_port}\" claude --model \"${provider_name} ${model}\" $*"
+        echo "  ANTHROPIC_BASE_URL=\"http://localhost:${proxy_port}\" claude --model \"${model}\" $*"
         return 0
     fi
 
@@ -1536,7 +1536,7 @@ launch_claude_openai_provider() {
 
     # Launch Claude with proxy
     log_info "Starting Claude via ${provider_name} (model: ${model})..."
-    ANTHROPIC_BASE_URL="http://localhost:${proxy_port}" claude --model "${provider_name} ${model}" "$@"
+    ANTHROPIC_BASE_URL="http://localhost:${proxy_port}" claude --model "${model}" "$@"
 }
 
 # ============================================================================
