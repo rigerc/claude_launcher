@@ -74,9 +74,10 @@ PROXY_PORT="${PROXY_PORT:-8080}"
 PROXY_STARTUP_TIMEOUT="${PROXY_STARTUP_TIMEOUT:-30}"
 PROXY_HEALTH_CHECK_INTERVAL="${PROXY_HEALTH_CHECK_INTERVAL:-1}"
 
-# Provider filter settings (disabled)
-# PROVIDER_MODELS_ONLY_FREE="${PROVIDER_MODELS_ONLY_FREE:-true}"
-# PROVIDER_MODELS_ONLY_REASONING="${PROVIDER_MODELS_ONLY_REASONING:-true}"
+# Provider filter settings
+FILTER_TOOL_CALL="${FILTER_TOOL_CALL:-true}"
+FILTER_FREE="${FILTER_FREE:-true}"
+FILTER_REASONING="${FILTER_REASONING:-true}"
 PREFERRED_MODELS="${PREFERRED_MODELS:-}"
 
 # Z.ai configuration
@@ -677,6 +678,15 @@ validate_config() {
         ZAI_BASE_URL="https://api.z.ai/api/anthropic"
     fi
 
+    # Validate filter boolean values
+    for filter_var in FILTER_TOOL_CALL FILTER_FREE FILTER_REASONING; do
+        local filter_value="${!filter_var}"
+        if [[ "${filter_value}" != "true" ]] && [[ "${filter_value}" != "false" ]]; then
+            log_warn "Invalid ${filter_var} value: ${filter_value}. Using default: true"
+            declare -g "${filter_var}=true"
+        fi
+    done
+
     # Update current log level
     current_log_level=$(get_log_level_value "${LOG_LEVEL}")
 
@@ -782,7 +792,27 @@ get_openai_compatible_providers() {
         die "${E_API}" "API cache not loaded. Call load_api_data first."
     fi
 
-    jq 'to_entries | map(
+    # Convert filter variables to boolean strings for jq
+    local filter_tool_call="${FILTER_TOOL_CALL}"
+    local filter_free="${FILTER_FREE}"
+    local filter_reasoning="${FILTER_REASONING}"
+
+    # Log active filters
+    local active_filters=()
+    [[ "${filter_tool_call}" == "true" ]] && active_filters+=("tool_call")
+    [[ "${filter_free}" == "true" ]] && active_filters+=("free")
+    [[ "${filter_reasoning}" == "true" ]] && active_filters+=("reasoning")
+
+    if [[ ${#active_filters[@]} -gt 0 ]]; then
+        log_debug "Active model filters: ${active_filters[*]}"
+    else
+        log_debug "No model filters active (showing all models)"
+    fi
+
+    jq --arg filter_tool_call "${filter_tool_call}" \
+       --arg filter_free "${filter_free}" \
+       --arg filter_reasoning "${filter_reasoning}" \
+       'to_entries | map(
         select(.value.npm != null and (.value.npm | type) == "string" and (.value.npm == "@ai-sdk/openai-compatible" or .value.npm == "@ai-sdk/openai")) |
         {
             provider_key: .key,
@@ -795,12 +825,26 @@ get_openai_compatible_providers() {
             doc: .value.doc,
             models: [
                 .value.models | to_entries[] |
-                select(.value.tool_call == true) |
+                select(
+                    # Apply tool_call filter if enabled
+                    (if $filter_tool_call == "true" then .value.tool_call == true else true end) and
+                    # Apply free filter if enabled (check all cost fields)
+                    (if $filter_free == "true" then
+                        (.value.cost.input == 0 and .value.cost.output == 0 and
+                         (.value.cost.reasoning // 0) == 0 and
+                         (.value.cost.cache_read // 0) == 0 and
+                         (.value.cost.input_audio // 0) == 0 and
+                         (.value.cost.output_audio // 0) == 0)
+                    else true end) and
+                    # Apply reasoning filter if enabled
+                    (if $filter_reasoning == "true" then .value.reasoning == true else true end)
+                ) |
                 {
                     id: .key,
                     name: .value.name,
                     reasoning: .value.reasoning,
-                    cost: .value.cost
+                    cost: .value.cost,
+                    tool_call: .value.tool_call
                 }
             ]
         }
@@ -1416,9 +1460,14 @@ Environment Variables:
   AUTO_SELECT_PROVIDER              Auto-select provider without menu
   QUIET_MODE                        Enable quiet mode (true/false)
   LOG_LEVEL                         Logging level (DEBUG, INFO, WARN, ERROR)
-  ZAI_API_KEY                      Z.ai API key
+  ZAI_API_KEY                       Z.ai API key
   PREFERRED_MODELS                  Comma-separated list of preferred model names
   CACHE_TTL                         API cache TTL in seconds (default: 3600)
+
+  Model Filtering (default: true for all):
+  FILTER_TOOL_CALL                  Only show models with tool calling support
+  FILTER_FREE                       Only show free models (cost = 0)
+  FILTER_REASONING                  Only show models with reasoning capabilities
 
 Provider API Keys:
   Each OpenAI-compatible provider requires its own API key.
