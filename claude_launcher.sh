@@ -35,6 +35,31 @@ readonly E_USER_CANCEL=6
 readonly E_PROXY=7
 
 # ============================================================================
+# Constants
+# ============================================================================
+
+# Cache and update check intervals (in seconds)
+readonly CLAUDE_CONNECT_UPDATE_CHECK_INTERVAL=$((24 * 60 * 60))  # 24 hours
+
+# Log rotation settings
+readonly LOG_MAX_SIZE_BYTES=$((10 * 1024 * 1024))  # 10MB
+
+# Process termination settings
+readonly PROCESS_TERM_TIMEOUT=30  # seconds
+readonly CLEANUP_PROXY_TIMEOUT=10  # seconds
+
+# PID validation limits
+readonly MIN_PID=1
+readonly MAX_PID=4194304
+
+# Proxy health check settings
+readonly PROXY_DEFAULT_PORT_START=8000
+readonly PROXY_DEFAULT_PORT_END=9000
+
+# Hash sample size for update checks (bytes)
+readonly UPDATE_CHECK_SAMPLE_SIZE=1024
+
+# ============================================================================
 # Configuration File Locations (in order of precedence)
 # ============================================================================
 
@@ -136,9 +161,8 @@ current_log_level=$(get_log_level_value "${LOG_LEVEL}")
 # Log file rotation
 rotate_logs() {
     local log_file="${LOG_DIR}/${SCRIPT_NAME}.log"
-    local max_size=$((10 * 1024 * 1024))  # 10MB
 
-    if [[ -f "${log_file}" ]] && [[ $(stat -c%s "${log_file}" 2>/dev/null || echo 0) -gt ${max_size} ]]; then
+    if [[ -f "${log_file}" ]] && [[ $(stat -c%s "${log_file}" 2>/dev/null || echo 0) -gt ${LOG_MAX_SIZE_BYTES} ]]; then
         mv "${log_file}" "${log_file}.old" 2>/dev/null || true
     fi
 }
@@ -315,8 +339,8 @@ is_valid_pid() {
         return 1
     fi
 
-    # Check if it's in valid range (PIDs are typically positive and < 4194304)
-    if [[ ${pid} -lt 1 ]] || [[ ${pid} -gt 4194304 ]]; then
+    # Check if it's in valid range
+    if [[ ${pid} -lt ${MIN_PID} ]] || [[ ${pid} -gt ${MAX_PID} ]]; then
         return 1
     fi
 
@@ -326,7 +350,7 @@ is_valid_pid() {
 # Safely terminate a process with proper escalation
 terminate_process_safely() {
     local pid="$1"
-    local timeout="${2:-30}"
+    local timeout="${2:-${PROCESS_TERM_TIMEOUT}}"
     local process_name="${3:-process}"
 
     if ! is_valid_pid "${pid}"; then
@@ -454,7 +478,7 @@ cleanup_leftover_proxies_silent() {
                 cmd_line=$(ps -p "${old_pid}" -o args= 2>/dev/null || echo "")
 
                 if [[ "${cmd_line}" == *"claude_connect.py"* ]]; then
-                    terminate_process_safely "${old_pid}" 10 "claude_connect.py" >/dev/null 2>&1 || true
+                    terminate_process_safely "${old_pid}" "${CLEANUP_PROXY_TIMEOUT}" "claude_connect.py" >/dev/null 2>&1 || true
                 fi
             fi
         fi
@@ -499,7 +523,7 @@ cleanup_leftover_proxies() {
                 if [[ "${cmd_line}" == *"claude_connect.py"* ]]; then
                     log_info "Found leftover proxy process (PID: ${old_pid}), cleaning up..."
 
-                    if terminate_process_safely "${old_pid}" 10 "claude_connect.py"; then
+                    if terminate_process_safely "${old_pid}" "${CLEANUP_PROXY_TIMEOUT}" "claude_connect.py"; then
                         cleaned=true
                     fi
                 else
@@ -541,7 +565,58 @@ sanitize_string() {
 # Validate URL format
 is_valid_url() {
     local url="$1"
-    [[ "${url}" =~ ^https?://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$ ]]
+
+    # Check for empty URL
+    if [[ -z "${url}" ]]; then
+        return 1
+    fi
+
+    # Validate URL format
+    if ! [[ "${url}" =~ ^https?://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$ ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate port number
+is_valid_port() {
+    local port="$1"
+
+    # Check if it's a number
+    if ! [[ "${port}" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+
+    # Check if it's in valid range (1-65535)
+    if [[ ${port} -lt 1 ]] || [[ ${port} -gt 65535 ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate file path exists and is readable
+validate_file_path() {
+    local file_path="$1"
+    local file_desc="${2:-file}"
+
+    if [[ -z "${file_path}" ]]; then
+        log_error "Empty file path for ${file_desc}"
+        return 1
+    fi
+
+    if [[ ! -f "${file_path}" ]]; then
+        log_error "${file_desc} not found: ${file_path}"
+        return 1
+    fi
+
+    if [[ ! -r "${file_path}" ]]; then
+        log_error "${file_desc} is not readable: ${file_path}"
+        return 1
+    fi
+
+    return 0
 }
 
 # Validate environment variable exists and is not empty
@@ -661,7 +736,7 @@ validate_config() {
     fi
 
     # Validate proxy port
-    if ! [[ "${PROXY_PORT}" =~ ^[0-9]+$ ]] || [[ ${PROXY_PORT} -lt 1024 ]] || [[ ${PROXY_PORT} -gt 65535 ]]; then
+    if ! is_valid_port "${PROXY_PORT}" || [[ ${PROXY_PORT} -lt 1024 ]]; then
         log_warn "Invalid PROXY_PORT value: ${PROXY_PORT}. Using default: 8080"
         PROXY_PORT=8080
     fi
@@ -893,9 +968,17 @@ save_claude_connect_to_config() {
     if [[ -f "${config_file}" ]]; then
         # Check if CLAUDE_CONNECT_SCRIPT already exists in config
         if grep -q "^CLAUDE_CONNECT_SCRIPT=" "${config_file}" 2>/dev/null; then
-            # Update existing line
+            # Update existing line using a secure temporary file
             log_debug "Updating existing CLAUDE_CONNECT_SCRIPT in config"
-            sed -i.tmp "s|^CLAUDE_CONNECT_SCRIPT=.*|CLAUDE_CONNECT_SCRIPT=\"${script_path}\"|g" "${config_file}"
+            local temp_file
+            temp_file=$(mktemp "${config_file}.XXXXXX") || {
+                log_error "Failed to create temporary file"
+                return 1
+            }
+            temp_files+=("${temp_file}")
+
+            sed "s|^CLAUDE_CONNECT_SCRIPT=.*|CLAUDE_CONNECT_SCRIPT=\"${script_path}\"|g" "${config_file}" > "${temp_file}" && \
+                mv "${temp_file}" "${config_file}"
         else
             # Add new line
             log_debug "Adding new CLAUDE_CONNECT_SCRIPT to config"
@@ -911,9 +994,6 @@ save_claude_connect_to_config() {
 CLAUDE_CONNECT_SCRIPT="${script_path}"
 EOF
     fi
-
-    # Remove temporary file if it exists
-    rm -f "${config_file}.tmp" 2>/dev/null || true
 
     # Set secure permissions
     chmod 600 "${config_file}" 2>/dev/null || true
@@ -951,12 +1031,12 @@ prompt_claude_connect_path() {
         local retry
         retry=$(gum choose "yes" "no") || exit "${E_USER_CANCEL}"
 
-        if [[ "${retry}" == "yes" ]]; then
-            prompt_claude_connect_path
-            return
-        else
+        if [[ "${retry}" != "yes" ]]; then
             die "${E_CONFIG}" "Claude Connect script path is required for OpenAI provider"
         fi
+
+        prompt_claude_connect_path
+        return
     fi
 
     # Validate that it's a Python script
@@ -1021,7 +1101,7 @@ check_claude_connect_updates() {
     local script_path="$1"
     local remote_url="https://raw.githubusercontent.com/drbarq/Claude-Connect/main/claude_connect.py"
     local cache_file="${CACHE_DIR}/claude_connect_remote_version"
-    local max_age=86400  # 24 hours in seconds
+    local max_age="${CLAUDE_CONNECT_UPDATE_CHECK_INTERVAL}"
 
     # Skip if we've checked recently
     if [[ -f "${cache_file}" ]] && is_cache_valid "${cache_file}" "${max_age}"; then
@@ -1030,11 +1110,11 @@ check_claude_connect_updates() {
 
     log_info "Checking for Claude Connect updates..."
 
-    # Get remote file content hash (first 1KB for quick comparison)
+    # Get remote file content hash (first portion for quick comparison)
     local remote_hash=""
     local remote_content
     remote_content=$(curl --silent --max-time 10 --connect-timeout 5 "${remote_url}" 2>/dev/null | \
-                    head -c 1024) || remote_content=""
+                    head -c "${UPDATE_CHECK_SAMPLE_SIZE}") || remote_content=""
 
     if [[ -n "${remote_content}" ]]; then
         remote_hash=$(echo "${remote_content}" | md5sum 2>/dev/null | cut -d' ' -f1 || echo "")
@@ -1048,11 +1128,11 @@ check_claude_connect_updates() {
         return 0
     fi
 
-    # Get local file content hash (first 1KB for comparison)
+    # Get local file content hash (first portion for comparison)
     local local_hash=""
     if [[ -f "${script_path}" ]]; then
         local local_content
-        local_content=$(head -c 1024 "${script_path}" 2>/dev/null) || local_content=""
+        local_content=$(head -c "${UPDATE_CHECK_SAMPLE_SIZE}" "${script_path}" 2>/dev/null) || local_content=""
         if [[ -n "${local_content}" ]]; then
             local_hash=$(echo "${local_content}" | md5sum 2>/dev/null | cut -d' ' -f1 || echo "")
         fi
@@ -1095,12 +1175,13 @@ check_claude_connect() {
         prompt_claude_connect_path
     fi
 
+    # Verify Python is available
     if ! command_exists python && ! command_exists python3; then
         die "${E_DEPENDENCY}" "Python is not installed (required for Claude Connect)"
     fi
 
-    # Check for updates (only if enabled and script exists)
-    if [[ "${CHECK_CLAUDE_CONNECT_UPDATES}" == "true" ]] && [[ -f "${CLAUDE_CONNECT_SCRIPT}" ]]; then
+    # Check for updates if enabled
+    if [[ "${CHECK_CLAUDE_CONNECT_UPDATES}" == "true" ]]; then
         check_claude_connect_updates "${CLAUDE_CONNECT_SCRIPT}"
     fi
 }
@@ -1111,8 +1192,8 @@ check_claude_connect() {
 
 # Find available port
 find_available_port() {
-    local start_port="${1:-8000}"
-    local end_port="${2:-9000}"
+    local start_port="${1:-${PROXY_DEFAULT_PORT_START}}"
+    local end_port="${2:-${PROXY_DEFAULT_PORT_END}}"
     local port
 
     for port in $(seq "${start_port}" "${end_port}"); do
@@ -1351,29 +1432,27 @@ launch_claude_openai_provider() {
     fi
 
     # Get API key (skip for dry run)
-    if [[ "${DRY_RUN}" != "true" ]]; then
-        if [[ -n "${api_key_env}" ]] && [[ -n "${!api_key_env:-}" ]]; then
-            api_key="${!api_key_env}"
-            log_info "Using ${api_key_env} from environment"
-        else
-            local prompt="Enter API Key"
-            if [[ -n "${api_key_env}" ]]; then
-                prompt="Enter ${api_key_env}"
-            fi
-
-            api_key=$(gum input --password --placeholder "${prompt}") || exit "${E_USER_CANCEL}"
-
-            if [[ -z "${api_key}" ]]; then
-                die "${E_CONFIG}" "API key is required"
-            fi
-        fi
-    else
+    if [[ "${DRY_RUN}" == "true" ]]; then
         # For dry run, simulate API key
         api_key="********-****-****-****-************"
         if [[ -n "${api_key_env}" ]]; then
             log_info "Would use ${api_key_env} environment variable for API key"
         else
             log_info "Would prompt for API key"
+        fi
+    elif [[ -n "${api_key_env}" ]] && [[ -n "${!api_key_env:-}" ]]; then
+        api_key="${!api_key_env}"
+        log_info "Using ${api_key_env} from environment"
+    else
+        local prompt="Enter API Key"
+        if [[ -n "${api_key_env}" ]]; then
+            prompt="Enter ${api_key_env}"
+        fi
+
+        api_key=$(gum input --password --placeholder "${prompt}") || exit "${E_USER_CANCEL}"
+
+        if [[ -z "${api_key}" ]]; then
+            die "${E_CONFIG}" "API key is required"
         fi
     fi
 
