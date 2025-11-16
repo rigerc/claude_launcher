@@ -725,59 +725,64 @@ is_cache_valid() {
 
 # Fetch API data from models.dev
 fetch_api_data() {
-    local temp_file="${CACHE_DIR}/api.tmp.${SCRIPT_PID}"
-    temp_files+=("${temp_file}")
-
     log_info "Fetching API data from ${MODELS_DEV_API_URL}..."
 
-    # Use timeout and follow redirects
+    # Use conditional request with curl's built-in features
+    # --time-cond sends If-Modified-Since header (only downloads if newer)
+    # --remote-time preserves server's Last-Modified timestamp
+    # If cache exists and is up-to-date, curl returns 0 without rewriting file
+    local curl_exit_code=0
     if ! curl --fail --silent --show-error \
               --max-time 30 \
               --location \
-              --output "${temp_file}" \
+              --remote-time \
+              --time-cond "${API_CACHE}" \
+              --output "${API_CACHE}" \
               "${MODELS_DEV_API_URL}"; then
-        rm -f "${temp_file}"
+        curl_exit_code=$?
 
         # Try to use stale cache if available
         if [[ -f "${API_CACHE}" ]]; then
-            log_warn "Failed to fetch API data, using stale cache"
+            log_warn "Failed to fetch API data (curl exit code: ${curl_exit_code}), using stale cache"
             return 0
         fi
 
         die "${E_NETWORK}" "Failed to fetch API data from ${MODELS_DEV_API_URL}"
     fi
 
-    # Validate JSON before accepting
-    if ! jq empty "${temp_file}" 2>/dev/null; then
-        rm -f "${temp_file}"
+    # Validate JSON (only if file exists and has content)
+    if [[ -f "${API_CACHE}" ]] && [[ -s "${API_CACHE}" ]]; then
+        if ! jq empty "${API_CACHE}" 2>/dev/null; then
+            # Try to restore from backup if validation fails
+            local backup_cache="${API_CACHE}.bak"
+            if [[ -f "${backup_cache}" ]]; then
+                log_warn "Invalid JSON received, restoring from backup"
+                cp "${backup_cache}" "${API_CACHE}"
+                return 0
+            fi
 
-        # Try to use stale cache if available
-        if [[ -f "${API_CACHE}" ]]; then
-            log_warn "Invalid JSON received, using stale cache"
-            return 0
+            die "${E_API}" "Invalid JSON received from API and no backup available"
         fi
 
-        die "${E_API}" "Invalid JSON received from API"
+        # Create backup of valid cache
+        cp "${API_CACHE}" "${API_CACHE}.bak" 2>/dev/null || true
+        log_info "API data cached successfully"
+    else
+        log_debug "No new data fetched (file up-to-date or not modified)"
     fi
-
-    # Atomic move to cache location
-    if ! mv "${temp_file}" "${API_CACHE}"; then
-        rm -f "${temp_file}"
-        die "${E_API}" "Failed to update API cache"
-    fi
-
-    log_info "API data cached successfully"
 }
 
 # Load API data (with caching)
 load_api_data() {
     log_debug "Loading API data..."
 
-    # Check cache validity
+    # Two-layer caching strategy:
+    # 1. Local time-based check (CACHE_TTL) - avoids network requests entirely
+    # 2. HTTP conditional request (If-Modified-Since) - bandwidth efficient when checking
     if ! is_cache_valid "${API_CACHE}"; then
-        fetch_api_data
+        fetch_api_data  # Uses curl --time-cond for conditional request
     else
-        log_debug "Using cached API data"
+        log_debug "Using cached API data (within TTL)"
     fi
 
     # Verify cache exists after fetch
