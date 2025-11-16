@@ -786,31 +786,40 @@ get_openai_compatible_providers() {
 
     local jq_filter
     case "${filter}" in
+        "free_reasoning")
+            jq_filter='select(has("cost") and .value.cost != null and (.value.cost.input // 1) == 0 and (.value.cost.output // 1) == 0 and .value.reasoning == true)'
+            ;;
         "free")
-            jq_filter='select(.value.tool_call == true and .value.cost.input == 0 and .value.cost.output == 0)'
+            jq_filter='select(has("cost") and .value.cost != null and (.value.cost.input // 1) == 0 and (.value.cost.output // 1) == 0)'
             ;;
         "reasoning")
-            jq_filter='select(.value.tool_call == true and .value.reasoning == true)'
+            jq_filter='select(.value.reasoning == true)'
+            ;;
+        "")
+            jq_filter='select(true)'
             ;;
         *)
-            jq_filter='select(.value.tool_call == true)'
+            log_warn "Invalid filter: ${filter}. Using no filter."
+            jq_filter='select(true)'
+            filter=""
             ;;
     esac
 
-    jq --arg jq_filter "${jq_filter}" 'to_entries | map(
-        select(.value.npm == "@ai-sdk/openai-compatible" or .value.npm == "@ai-sdk/openai") |
+    jq "to_entries | map(
+        select(.value.npm != null and (.value.npm | type) == \"string\" and (.value.npm == \"@ai-sdk/openai-compatible\" or .value.npm == \"@ai-sdk/openai\")) |
         {
             provider_key: .key,
             id: .value.id,
             name: .value.name,
-            api: (.value.api | if (type == "string" and (endswith("/v1") or endswith("/v1/"))) then
-                        if endswith("/v1/") then .[:-4] elif endswith("/v1") then .[:-3] else . end
+            api: (.value.api | if (type == \"string\" and (endswith(\"/v1\") or endswith(\"/v1/\"))) then
+                        if endswith(\"/v1/\") then .[:-4] elif endswith(\"/v1\") then .[:-3] else . end
                     else . end),
             env: .value.env,
             doc: .value.doc,
             models: [
                 .value.models | to_entries[] |
-                select($jq_filter) |
+                select(.value.tool_call == true) |
+                ${jq_filter} |
                 {
                     id: .key,
                     name: .value.name,
@@ -819,7 +828,7 @@ get_openai_compatible_providers() {
                 }
             ]
         }
-    ) | map(select(.models | length > 0)) | .[]' "${API_CACHE}"
+    ) | map(select(.models | length > 0)) | .[]" "${API_CACHE}"
 }
 
 # Get provider list for selection
@@ -1284,10 +1293,12 @@ launch_claude_openai_provider() {
 
     # Determine filter based on settings
     filter=""
-    if [[ "${PROVIDER_MODELS_ONLY_FREE}" == "true" ]]; then
-        filter="free"
+    if [[ "${PROVIDER_MODELS_ONLY_REASONING}" == "true" ]] && [[ "${PROVIDER_MODELS_ONLY_FREE}" == "true" ]]; then
+        filter="free_reasoning"
     elif [[ "${PROVIDER_MODELS_ONLY_REASONING}" == "true" ]]; then
         filter="reasoning"
+    elif [[ "${PROVIDER_MODELS_ONLY_FREE}" == "true" ]]; then
+        filter="free"
     fi
 
     # Get available providers
@@ -1377,7 +1388,9 @@ launch_claude_openai_provider() {
 
     # Select model if not auto-selected
     if [[ "${model_selected}" == "false" ]]; then
-        model=$(echo "${models}" | gum choose --header "Select Model") || exit "${E_USER_CANCEL}"
+        local model_count
+        model_count=$(echo "${models}" | wc -l)
+        model=$(echo "${models}" | gum choose --header "Select Model (${model_count} available)") || exit "${E_USER_CANCEL}"
     fi
 
     if [[ -z "${model}" ]]; then
