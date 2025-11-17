@@ -109,29 +109,15 @@ Just need the regular Claude CLI installed and configured.
 Set `ZAI_API_KEY` and you're good to go.
 
 ### OpenAI-compatible providers
-The script uses [Claude-Connect](https://github.com/drbarq/Claude-Connect) as a proxy and gets provider info from [models.dev](https://models.dev/api.json). It'll prompt for API keys as needed. The launcher will use env variables from Models.dev for each provider for the API key.
+The script uses [Claude-Connect](https://github.com/drbarq/Claude-Connect) as a proxy and gets provider info from [models.dev](https://models.dev/api.json). It'll prompt for API keys as needed. The launcher will use env variables from Models.dev for each provider for the API key. Claude-Connect will transform OpenAI to Anthropic's format. It's a bit hit or miss, but with some models it works.
 
 ## Configuration (optional)
 
-Create `~/.claude_launcher.conf`:
-
-```bash
-# Claude Connect script path
-CLAUDE_CONNECT_SCRIPT="/path/to/claude_connect.py"
-
-# Show only free models
-PROVIDER_MODELS_ONLY_FREE="true"
-
-# Your favorite models (comma-separated)
-PREFERRED_MODELS="GPT-4,Claude-3-Sonnet"
-
-# Z.ai settings
-ZAI_API_KEY="your_key_here"
-```
+Create `~/.claude_launcher.conf` if you want. See [claude_launcher.example.conf](claude_launcher.examlple.conf) for example settings you can set.
 
 ## Troubleshooting
 
-**Missing dependencies?** Install gum, jq, and curl (see above).
+**Missing dependencies?** Install gum, jq, and curl.
 
 **Claude-Connect not found?** Set `CLAUDE_CONNECT_SCRIPT` or let the script prompt you.
 
